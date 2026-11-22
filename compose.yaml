@@ -1,0 +1,11 @@
+# FlareSolverr plus a container to run login commands in.
+# The MCP client starts superu-mcp itself, see the README.
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+    networks: [superu]
+
+networks:
+  superu:
+    name: superu

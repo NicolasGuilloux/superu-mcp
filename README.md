@@ -92,6 +92,42 @@ Or in a client's JSON configuration:
 | `login_start` | Get a login link |
 | `login_finish` | Finish logging in with the copied address |
 
+## Docker
+
+Each push to `main` publishes `ghcr.io/nicolasguilloux/superu-mcp` (amd64 and
+arm64; tags `latest`, `main`, `sha-…`, and `X.Y.Z` for `vX.Y.Z` git tags). The
+image runs `superu-mcp` and also holds the `coursesu` CLI. The session is kept
+in a volume, and FlareSolverr is reached at `http://flaresolverr:8191/v1` on a
+shared network:
+
+```sh
+docker compose up -d          # starts FlareSolverr on the "superu" network
+
+# log in once
+docker run -it --rm --network superu -v superu-session:/home/nonroot/.config/coursesu \
+  --entrypoint coursesu ghcr.io/nicolasguilloux/superu-mcp login --link
+docker run -it --rm --network superu -v superu-session:/home/nonroot/.config/coursesu \
+  --entrypoint coursesu ghcr.io/nicolasguilloux/superu-mcp login --callback '<url>'
+```
+
+MCP client configuration (stdio, so `-i` is required):
+
+```json
+{
+  "mcpServers": {
+    "superu": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--network", "superu",
+               "-v", "superu-session:/home/nonroot/.config/coursesu",
+               "ghcr.io/nicolasguilloux/superu-mcp"]
+    }
+  }
+}
+```
+
+The container runs as uid 65532. With a bind mount instead of a named volume,
+make the host directory writable by that uid.
+
 ## CLI
 
 ```
