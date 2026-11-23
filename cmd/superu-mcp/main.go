@@ -284,6 +284,7 @@ func serveHTTP(addr string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go keepAlive(ctx)
+	go renewLoop(ctx)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	log.Printf("MCP server listening on %s (Streamable HTTP: /mcp, SSE: /sse)", addr)
@@ -330,6 +331,48 @@ func keepAlive(ctx context.Context) {
 		callMu.Unlock()
 		if err != nil || !st.LoggedIn {
 			log.Printf("keepalive: session not logged in: %v", err)
+		}
+	}
+}
+
+// renewLoop renews the session with the SSO cookie once it is
+// COURSESU_RENEW_HOURS old (default 23, 0 turns it off), so the session is
+// replaced before it expires. It goes by the session's login time, which
+// survives restarts, and does nothing without a saved SSO cookie.
+func renewLoop(ctx context.Context) {
+	hours := 23
+	if v := os.Getenv("COURSESU_RENEW_HOURS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			log.Printf("renew: bad COURSESU_RENEW_HOURS %q, using 23", v)
+		} else {
+			hours = n
+		}
+	}
+	if hours <= 0 {
+		return
+	}
+	every := time.Duration(hours) * time.Hour
+	check := time.NewTicker(15 * time.Minute)
+	defer check.Stop()
+	var lastFail time.Time
+	for {
+		if at := session.AcquiredAt(); at > 0 && session.SSOCookie() != "" &&
+			time.Since(time.Unix(at, 0)) >= every && time.Since(lastFail) >= time.Hour {
+			callMu.Lock()
+			res, err := coursesu.WithClearance(ctx, coursesu.RenewSession)
+			callMu.Unlock()
+			if err != nil {
+				lastFail = time.Now()
+				log.Printf("renew: silent renewal failed, next try in an hour: %v", err)
+			} else {
+				log.Printf("renew: session renewed (%s)", res.Source)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-check.C:
 		}
 	}
 }

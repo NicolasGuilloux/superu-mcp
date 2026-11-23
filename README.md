@@ -89,6 +89,10 @@ Two things keep it going:
 - In HTTP mode, the server opens an account page every 10 minutes so the
   session does not time out while idle. Set `COURSESU_KEEPALIVE` to another
   number of minutes, or `0` to turn it off.
+- In HTTP mode, once the session is 23 hours old and an SSO cookie is saved,
+  the server renews it silently, without waiting for it to expire (it retries
+  every hour if that fails; look for `renew:` in the logs). Set
+  `COURSESU_RENEW_HOURS` to another number of hours, or `0` to turn it off.
 - Silent renewal, the way coursesu.com renews its own session: an OpenID
   Connect request with `prompt=none` sent with the Magasins U SSO cookie. To
   set it up, after logging in, copy the value of the `b870a934f1cc0fa` cookie
