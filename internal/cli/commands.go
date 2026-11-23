@@ -201,6 +201,14 @@ func subcommands() []*cobra.Command {
 				}
 				return coursesu.CartSet(ctx, a[0], qty)
 			}),
+		simpleCmd("stores <postcode> <town>",
+			"list the drive stores near a postcode and town",
+			cobra.ExactArgs(2), func(ctx context.Context, a []string) (any, error) {
+				return coursesu.FindStores(ctx, a[0], a[1])
+			}),
+		simpleCmd("store-set <store-id>",
+			"choose the store the cart and searches use (ids from `stores`)",
+			cobra.ExactArgs(1), arg1(coursesu.SetStore)),
 		simpleCmd("cart-clear", "empty the cart",
 			cobra.NoArgs, arg0(coursesu.CartClear)),
 		simpleCmd("product <pid>...",

@@ -34,6 +34,15 @@ type searchIn struct {
 	Size  int    `json:"size,omitempty" jsonschema:"results per page (default: 20)"`
 }
 
+type storesIn struct {
+	Postcode string `json:"postcode" jsonschema:"French postcode, e.g. 35136"`
+	Town     string `json:"town" jsonschema:"town name, e.g. Saint-Jacques-de-la-Lande"`
+}
+
+type storeSetIn struct {
+	StoreID string `json:"store_id" jsonschema:"store id from stores_find"`
+}
+
 type eanIn struct {
 	EAN string `json:"ean" jsonschema:"product EAN-13 barcode (a coursesu product id is accepted too)"`
 }
@@ -133,6 +142,20 @@ func newServer() *mcp.Server {
 			return call(ctx, func(ctx context.Context) (any, error) {
 				return coursesu.Favorites(ctx, coursesu.FavoritesOptions{MaxPages: 50, Limit: in.Limit})
 			})
+		})
+
+	mcp.AddTool(server, &mcp.Tool{Name: "stores_find",
+		Description: "List the drive stores near a postcode and town, nearest first, with their ids. Requires login."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in storesIn) (*mcp.CallToolResult, any, error) {
+			return call(ctx, func(ctx context.Context) (any, error) {
+				return coursesu.FindStores(ctx, in.Postcode, in.Town)
+			})
+		})
+
+	mcp.AddTool(server, &mcp.Tool{Name: "store_set",
+		Description: "Choose the store (drive pickup) that searches and the cart use. Do it before adding to the cart. Requires login."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in storeSetIn) (*mcp.CallToolResult, any, error) {
+			return call(ctx, func(ctx context.Context) (any, error) { return coursesu.SetStore(ctx, in.StoreID) })
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "basket_get",
