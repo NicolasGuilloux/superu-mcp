@@ -3,8 +3,10 @@ package session
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -88,12 +90,39 @@ func Persist(jar, set map[string]string) {
 
 // SSOCookie returns the Magasins U SSO session cookie saved for silent
 // renewal, or "".
-func SSOCookie() string { return load().SSOCookie }
+func SSOCookie() string { return ssoValue(load().SSOCookie) }
 
-// SetSSOCookie saves the SSO session cookie next to the session.
+// ssoCookieName is the Magasins U SSO session cookie name.
+const ssoCookieName = "b870a934f1cc0fa"
+
+// ssoValue accepts either the bare SSO cookie value or a whole Cookie
+// header copied from the browser ("a=1; b870a934f1cc0fa=…; c=3"), and
+// returns the SSO cookie value.
+func ssoValue(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(v, "Cookie:")
+	v = strings.TrimPrefix(v, "cookie:")
+	if !strings.Contains(v, "=") {
+		return v
+	}
+	for _, part := range strings.Split(v, ";") {
+		name, val, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if ok && name == ssoCookieName {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
+}
+
+// SetSSOCookie saves the SSO session cookie next to the session. v can be
+// the cookie value or a whole Cookie header that contains it.
 func SetSSOCookie(v string) error {
+	val := ssoValue(v)
+	if val == "" {
+		return fmt.Errorf("no %s cookie found in what was given: pass its value, or the whole Cookie header of a moncompte.magasins-u.com request", ssoCookieName)
+	}
 	s := load()
-	s.SSOCookie = v
+	s.SSOCookie = val
 	if err := os.MkdirAll(ConfigDir, 0o700); err != nil {
 		return err
 	}

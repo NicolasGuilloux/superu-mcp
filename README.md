@@ -94,7 +94,9 @@ Two things keep it going:
   set it up, after logging in, copy the value of the `b870a934f1cc0fa` cookie
   of `moncompte.magasins-u.com` (DevTools, Application, Cookies) and pass it
   with `coursesu login --sso-cookie '<value>'` (it can go along with
-  `--callback`), or as `sso_cookie` to `login_finish`. When the coursesu
+  `--callback`), or as `sso_cookie` to `login_finish`. The whole `Cookie`
+  header of a moncompte.magasins-u.com request also works: the SSO cookie is
+  picked out of it. When the coursesu
   session has expired, the CLI and the MCP server then log in again on their
   own, for as long as the SSO session lasts. `coursesu login --renew` does it
   by hand.
