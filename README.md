@@ -53,6 +53,28 @@ Cloudflare turns a request away, the MCP server gets a new clearance through
 FlareSolverr and retries, keeping your account session. Log in again when the
 account session expires.
 
+### Keeping the session alive
+
+The coursesu.com session times out (it was gone within 8 hours in testing).
+Two things keep it going:
+
+- In HTTP mode, the server opens an account page every 10 minutes so the
+  session does not time out while idle. Set `COURSESU_KEEPALIVE` to another
+  number of minutes, or `0` to turn it off.
+- Silent renewal, the way coursesu.com renews its own session: an OpenID
+  Connect request with `prompt=none` sent with the Magasins U SSO cookie. To
+  set it up, after logging in, copy the value of the `b870a934f1cc0fa` cookie
+  of `moncompte.magasins-u.com` (DevTools, Application, Cookies) and pass it
+  with `coursesu login --sso-cookie '<value>'` (it can go along with
+  `--callback`), or as `sso_cookie` to `login_finish`. When the coursesu
+  session has expired, the CLI and the MCP server then log in again on their
+  own, for as long as the SSO session lasts. `coursesu login --renew` does it
+  by hand.
+
+There is no refresh token: the SSO does not allow that grant for the
+coursesu.com client. `coursesu session` (or the `session_status` tool) tells
+whether the session is still logged in and since when.
+
 Other ways to log in with the CLI: `coursesu login` drives a local Chromium
 window, `coursesu login --from-file curl.txt` reads a request copied as cURL
 from your browser's DevTools.
@@ -103,7 +125,8 @@ authenticating reverse proxy in front of it.
 | `orders_list` | none | Recent orders with their articles. Requires login. |
 | `order_detail` | `order_number` (required) | One order with all its articles. Requires login. |
 | `login_start` | none | Get a login link. |
-| `login_finish` | `callback_url` (required) | Finish logging in with the copied address. |
+| `login_finish` | `callback_url` (required), `sso_cookie` | Finish logging in with the copied address; the SSO cookie enables silent renewal. |
+| `session_status` | none | Whether the session is still logged in, since when, and whether it renews itself. |
 
 Where a tool takes an `ean`, a coursesu product id is accepted too. Unlike
 intermarche-mcp there are no `store_*` tools: the store and slot are chosen on
@@ -146,7 +169,8 @@ make the host directory writable by that uid.
 ## CLI
 
 ```
-coursesu login [--link | --callback <url> | --from-file <file>]
+coursesu login [--link | --callback <url> | --sso-cookie <value> | --renew | --from-file <file>]
+coursesu session
 coursesu search <query> [--limit n]
 coursesu product <pid>...
 coursesu favorites

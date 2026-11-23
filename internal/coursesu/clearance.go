@@ -61,15 +61,23 @@ func RefreshClearance(ctx context.Context) error {
 }
 
 // WithClearance runs fn, and when Cloudflare turns it away, gets a fresh
-// clearance through FlareSolverr and runs it once more.
+// clearance through FlareSolverr and runs it once more. When the coursesu
+// session has expired and an SSO cookie is saved, it renews the session
+// silently and runs fn again.
 func WithClearance[T any](ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
 	client.SetUserAgent(session.UserAgent())
 	out, err := fn(ctx)
-	if !IsCloudflareBlock(err) {
-		return out, err
+	if IsCloudflareBlock(err) {
+		if rerr := RefreshClearance(ctx); rerr != nil {
+			return out, errors.Join(err, rerr)
+		}
+		out, err = fn(ctx)
 	}
-	if rerr := RefreshClearance(ctx); rerr != nil {
-		return out, errors.Join(err, rerr)
+	if isSessionExpired(err) && session.SSOCookie() != "" {
+		if _, rerr := RenewSession(ctx); rerr != nil {
+			return out, errors.Join(err, rerr)
+		}
+		out, err = fn(ctx)
 	}
-	return fn(ctx)
+	return out, err
 }

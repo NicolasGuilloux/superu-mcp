@@ -24,6 +24,7 @@ type stored struct {
 	Cookies    map[string]string `json:"cookies"`
 	AcquiredAt int64             `json:"acquired_at"`
 	UserAgent  string            `json:"user_agent,omitempty"`
+	SSOCookie  string            `json:"sso_cookie,omitempty"`
 }
 
 func load() stored {
@@ -49,7 +50,8 @@ func SaveWithUserAgent(cookies map[string]string, acquiredAt int64, userAgent st
 	if err := os.MkdirAll(ConfigDir, 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(stored{Cookies: cookies, AcquiredAt: acquiredAt, UserAgent: userAgent}, "", "  ")
+	b, err := json.MarshalIndent(stored{Cookies: cookies, AcquiredAt: acquiredAt,
+		UserAgent: userAgent, SSOCookie: load().SSOCookie}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -82,4 +84,22 @@ func Persist(jar, set map[string]string) {
 		jar[k] = v
 	}
 	_ = Save(jar, AcquiredAt())
+}
+
+// SSOCookie returns the Magasins U SSO session cookie saved for silent
+// renewal, or "".
+func SSOCookie() string { return load().SSOCookie }
+
+// SetSSOCookie saves the SSO session cookie next to the session.
+func SetSSOCookie(v string) error {
+	s := load()
+	s.SSOCookie = v
+	if err := os.MkdirAll(ConfigDir, 0o700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(SessionFile, b, 0o600)
 }

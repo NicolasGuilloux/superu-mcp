@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -25,7 +26,7 @@ var version = "dev"
 
 const instructions = `Tools for coursesu.com, the Système U online supermarket (Super U, Hyper U, U Express drive and delivery).
 
-Log in once with login_start then login_finish; the session is saved and reused. Cart changes only work once a store and a delivery or pickup slot are chosen on coursesu.com. Products are identified by their EAN barcode, as returned by search_products, favorites_list and basket_get. The tools never place or pay for an order: the person checks out on coursesu.com.`
+Log in once with login_start then login_finish; the session is saved and reused, and renews itself when login_finish was given the SSO cookie. session_status tells whether it is still logged in. Cart changes only work once a store and a delivery or pickup slot are chosen on coursesu.com. Products are identified by their EAN barcode, as returned by search_products, favorites_list and basket_get. The tools never place or pay for an order: the person checks out on coursesu.com.`
 
 type searchIn struct {
 	Query string `json:"query" jsonschema:"product search query, in French, e.g. lait demi-écrémé"`
@@ -57,6 +58,7 @@ type favoritesIn struct {
 
 type loginFinishIn struct {
 	CallbackURL string `json:"callback_url" jsonschema:"the www.coursesu.com address containing code= and state=, copied after logging in with the login_start link"`
+	SSOCookie   string `json:"sso_cookie,omitempty" jsonschema:"optional: value of the b870a934f1cc0fa cookie of moncompte.magasins-u.com, so the session renews itself when it expires"`
 }
 
 type empty struct{}
@@ -199,8 +201,19 @@ func newServer() *mcp.Server {
 			"person copied after using the login_start link. Do it right away: the code expires within minutes."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in loginFinishIn) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) {
+				if in.SSOCookie != "" {
+					if err := session.SetSSOCookie(in.SSOCookie); err != nil {
+						return nil, err
+					}
+				}
 				return coursesu.LoginCallback(ctx, in.CallbackURL)
 			})
+		})
+
+	mcp.AddTool(server, &mcp.Tool{Name: "session_status",
+		Description: "Tell whether the saved coursesu.com session is still logged in, since when, and whether it renews itself."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
+			return call(ctx, func(ctx context.Context) (any, error) { return coursesu.Status(ctx) })
 		})
 
 	return server
@@ -270,6 +283,7 @@ func serveHTTP(addr string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go keepAlive(ctx)
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
 	log.Printf("MCP server listening on %s (Streamable HTTP: /mcp, SSE: /sse)", addr)
@@ -282,4 +296,40 @@ func serveHTTP(addr string) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// keepAlive opens an account page every COURSESU_KEEPALIVE minutes (default
+// 10, 0 disables), so the coursesu session does not time out while idle,
+// and renews it silently when it has expired and an SSO cookie is saved.
+func keepAlive(ctx context.Context) {
+	minutes := 10
+	if v := os.Getenv("COURSESU_KEEPALIVE"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			log.Printf("keepalive: bad COURSESU_KEEPALIVE %q, using 10", v)
+		} else {
+			minutes = n
+		}
+	}
+	if minutes <= 0 {
+		return
+	}
+	t := time.NewTicker(time.Duration(minutes) * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if _, err := session.RequireCookies(); err != nil {
+			continue
+		}
+		callMu.Lock()
+		st, err := coursesu.WithClearance(ctx, coursesu.Status)
+		callMu.Unlock()
+		if err != nil || !st.LoggedIn {
+			log.Printf("keepalive: session not logged in: %v", err)
+		}
+	}
 }

@@ -130,11 +130,23 @@ func LoginCallback(ctx context.Context, callback string) (model.LoginResult, err
 			"use the link printed by your last `coursesu login --link`", nil)
 	}
 
+	jar, ua, err := establishSession(ctx, u.Query().Get("code"), p.Verifier, oidcRedirectURI)
+	if err != nil {
+		return model.LoginResult{}, err
+	}
+	_ = os.Remove(pendingFile())
+	return finalizeLogin(jar, "link", nil, ua)
+}
+
+// establishSession trades an authorization code for tokens, hands them to
+// coursesu.com like its callback page does, and checks that an account page
+// loads. It returns the session cookies and the User-Agent they belong to.
+func establishSession(ctx context.Context, code, verifier, redirectURI string) (map[string]string, string, error) {
 	// coursesu.com sits behind Cloudflare: get a clearance and an anonymous
 	// session first, and use that browser's User-Agent for every request.
 	home, err := flaresolverr.New().Get(ctx, "", client.BaseURL+"/drive/home")
 	if err != nil {
-		return model.LoginResult{}, newErr(err.Error(), nil)
+		return nil, "", newErr(err.Error(), nil)
 	}
 	jar := map[string]string{}
 	for _, c := range home.Cookies {
@@ -146,18 +158,18 @@ func LoginCallback(ctx context.Context, callback string) (model.LoginResult, err
 
 	resp, err := client.PostURLEncoded(ctx, oidcToken, url.Values{
 		"grant_type":    {"authorization_code"},
-		"code":          {u.Query().Get("code")},
-		"redirect_uri":  {oidcRedirectURI},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
 		"client_id":     {oidcClientID},
-		"code_verifier": {p.Verifier},
+		"code_verifier": {verifier},
 	})
 	if err != nil {
-		return model.LoginResult{}, newErr(fmt.Sprintf("token request failed: %v", err), nil)
+		return nil, "", newErr(fmt.Sprintf("token request failed: %v", err), nil)
 	}
 	var tok tokenResponse
 	_ = json.Unmarshal([]byte(resp.Body), &tok)
 	if resp.StatusCode != 200 || tok.IDToken == "" || tok.AccessToken == "" {
-		return model.LoginResult{}, newErr("the SSO refused the code: it expired, was "+
+		return nil, "", newErr("the SSO refused the code: it expired, was "+
 			"already used (did the browser load the callback?), or comes from another link",
 			map[string]any{"status": resp.StatusCode, "sso_error": tok.Error,
 				"sso_error_description": tok.ErrorDesc, "body_preview": preview(resp.Body, 200)})
@@ -165,9 +177,9 @@ func LoginCallback(ctx context.Context, callback string) (model.LoginResult, err
 
 	body, _ := json.Marshal(map[string]any{"id_token": tok.IDToken,
 		"access_token": tok.AccessToken, "silentCB": false})
-	sres, err := client.PostJSON(ctx, setSessionURL, string(body), oidcRedirectURI, jar)
+	sres, err := client.PostJSON(ctx, setSessionURL, string(body), redirectURI, jar)
 	if err != nil {
-		return model.LoginResult{}, newErr(fmt.Sprintf("coursesu session request failed: %v", err), nil)
+		return nil, "", newErr(fmt.Sprintf("coursesu session request failed: %v", err), nil)
 	}
 	jar = client.MergeCookies(jar, sres.SetCookies)
 	var sessResp struct {
@@ -176,7 +188,7 @@ func LoginCallback(ctx context.Context, callback string) (model.LoginResult, err
 	}
 	_ = json.Unmarshal([]byte(sres.Body), &sessResp)
 	if sres.StatusCode != 200 || sessResp.Error {
-		return model.LoginResult{}, newErr("coursesu.com refused the tokens",
+		return nil, "", newErr("coursesu.com refused the tokens",
 			map[string]any{"status": sres.StatusCode, "coursesu_error": sessResp.ErrorMsg,
 				"body_preview": preview(sres.Body, 200)})
 	}
@@ -188,10 +200,8 @@ func LoginCallback(ctx context.Context, callback string) (model.LoginResult, err
 		if acc != nil {
 			status = acc.StatusCode
 		}
-		return model.LoginResult{}, newErr("logged in at the SSO, but coursesu.com's account "+
+		return nil, "", newErr("logged in at the SSO, but coursesu.com's account "+
 			"page did not load", map[string]any{"status": status, "cause": fmt.Sprint(err)})
 	}
-	jar = client.MergeCookies(jar, acc.SetCookies)
-	_ = os.Remove(pendingFile())
-	return finalizeLogin(jar, "link", nil, home.UserAgent)
+	return client.MergeCookies(jar, acc.SetCookies), home.UserAgent, nil
 }

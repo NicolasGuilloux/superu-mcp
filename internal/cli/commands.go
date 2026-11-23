@@ -11,6 +11,7 @@ import (
 
 	"github.com/NicolasGuilloux/superu-mcp/internal/coursesu"
 	"github.com/NicolasGuilloux/superu-mcp/internal/flaresolverr"
+	"github.com/NicolasGuilloux/superu-mcp/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +41,8 @@ func arg1[T any](fn func(context.Context, string) (T, error)) func(context.Conte
 }
 
 func newLoginCmd() *cobra.Command {
-	var fromFile, email, callback string
-	var link bool
+	var fromFile, email, callback, ssoCookie string
+	var link, renew bool
 	var firefox bool
 	cmd := &cobra.Command{
 		Use:   "login",
@@ -59,11 +60,22 @@ func newLoginCmd() *cobra.Command {
 			if fromFile != "" {
 				return coursesu.LoginFromCurl(ctx, fromFile)
 			}
+			if ssoCookie != "" {
+				if err := session.SetSSOCookie(ssoCookie); err != nil {
+					return nil, err
+				}
+				if callback == "" && !renew {
+					return map[string]any{"status": "ok", "sso_cookie": "saved"}, nil
+				}
+			}
 			if link {
 				return coursesu.LoginLink(ctx)
 			}
 			if callback != "" {
 				return coursesu.LoginCallback(ctx, callback)
+			}
+			if renew {
+				return coursesu.RenewSession(ctx)
 			}
 			if firefox {
 				return coursesu.LoginFirefox(ctx)
@@ -86,8 +98,26 @@ func newLoginCmd() *cobra.Command {
 		"print a login link to open in any browser (needs FlareSolverr)")
 	cmd.Flags().StringVar(&callback, "callback", "",
 		"finish a --link login with the coursesu.com URL containing code= and state=")
+	cmd.Flags().StringVar(&ssoCookie, "sso-cookie", "",
+		"save the Magasins U SSO cookie (b870a934f1cc0fa on moncompte.magasins-u.com) so the session renews itself")
+	cmd.Flags().BoolVar(&renew, "renew", false, "renew the session now with the saved SSO cookie")
 	cmd.Flags().BoolVar(&firefox, "firefox", false, "use the Firefox sessionstore flow instead")
 	return cmd
+}
+
+func newSessionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "session",
+		Short: "show whether the saved session is still logged in",
+		Args:  cobra.NoArgs,
+		RunE: run(func(ctx context.Context, _ []string) (any, error) {
+			st, err := coursesu.WithClearance(ctx, coursesu.Status)
+			if err != nil {
+				st.ExpiredMessage = err.Error()
+			}
+			return st, nil
+		}),
+	}
 }
 
 func newSearchCmd() *cobra.Command {
@@ -152,6 +182,7 @@ func newHistoryCmd() *cobra.Command {
 func subcommands() []*cobra.Command {
 	return []*cobra.Command{
 		newLoginCmd(),
+		newSessionCmd(),
 		newSearchCmd(),
 		newCartAddCmd(),
 		newFavoritesCmd(),
