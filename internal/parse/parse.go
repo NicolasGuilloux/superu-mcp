@@ -57,10 +57,7 @@ func Products(body string) ([]model.Product, error) {
 				cats = append(cats, *c)
 			}
 		}
-		promo := t.Promo.Name
-		if promo == "unknown" {
-			promo = ""
-		}
+		promo := knownPromo(t.Promo.Name)
 		out = append(out, model.Product{
 			ID:        t.ID,
 			Name:      t.Name,
@@ -87,6 +84,11 @@ type adobeProduct struct {
 	Cat3     *string `json:"product_cat3"`
 	Picture  *string `json:"product_url_picture"`
 	Notation any     `json:"notation"`
+	Price    string  `json:"price"`
+	Promo    struct {
+		Name string `json:"name"`
+	} `json:"promotion"`
+	Discount string `json:"discount"`
 }
 
 func AdobeProducts(body string) ([]model.ProductDetail, error) {
@@ -103,13 +105,16 @@ func AdobeProducts(body string) ([]model.ProductDetail, error) {
 			}
 		}
 		out = append(out, model.ProductDetail{
-			ID:       p.ID,
-			Name:     p.Name,
-			EAN:      p.EAN,
-			Brand:    p.Brand,
-			Category: strings.Join(cats, " > "),
-			Image:    p.Picture,
-			Rating:   toFloatPtr(p.Notation),
+			ID:        p.ID,
+			Name:      p.Name,
+			EAN:       p.EAN,
+			Brand:     p.Brand,
+			Category:  strings.Join(cats, " > "),
+			Image:     p.Picture,
+			Rating:    toFloatPtr(p.Notation),
+			Price:     p.Price,
+			Promotion: knownPromo(p.Promo.Name),
+			Discount:  p.Discount,
 		})
 	}
 	return out, nil
@@ -311,4 +316,59 @@ func toFloatPtr(v any) *float64 {
 		}
 	}
 	return nil
+}
+
+func knownPromo(name string) string {
+	if name == "unknown" {
+		return ""
+	}
+	return name
+}
+
+// ProductURL finds the page of product id in search results.
+func ProductURL(body, id string) string {
+	d, err := doc(body)
+	if err != nil {
+		return ""
+	}
+	var found string
+	d.Find("a[href]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		href, _ := s.Attr("href")
+		if strings.HasSuffix(strings.SplitN(href, "?", 2)[0], "/"+id+".html") {
+			found = href
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// ProductPage reads a product page: unit price, Nutri-Score and the
+// description sections (ingredients, nutrition values, storage...).
+func ProductPage(body string) (unitPrice, nutriScore string, sections map[string]string) {
+	d, err := doc(body)
+	if err != nil {
+		return "", "", nil
+	}
+	unitPrice = strings.Join(strings.Fields(d.Find(".unit-info").First().Text()), " ")
+	if alt, ok := d.Find(".icon-nutriscore img").First().Attr("alt"); ok {
+		nutriScore = strings.TrimSpace(strings.TrimPrefix(alt, "Nutriscore"))
+	}
+	sections = map[string]string{}
+	d.Find("[data-pdp-heading] ~ .pdp-description-content li.pdp-list-item").Each(func(_ int, s *goquery.Selection) {
+		label := strings.Join(strings.Fields(s.Find("h3").Text()), " ")
+		content := s.Next()
+		if label == "" || content.HasClass("pdp-list-item") {
+			return
+		}
+		content.Find("style, script, .nutriscore-text, .nutriscore-link").Remove()
+		text := strings.Join(strings.Fields(content.Text()), " ")
+		if text == "" || text == "-" {
+			return
+		}
+		if _, dup := sections[label]; !dup {
+			sections[label] = text
+		}
+	})
+	return unitPrice, nutriScore, sections
 }

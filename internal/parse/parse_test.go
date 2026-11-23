@@ -2,6 +2,7 @@ package parse
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -163,5 +164,28 @@ func TestParseEuro(t *testing.T) {
 	}
 	if parseEuro("not a price") != nil {
 		t.Fatal("parseEuro should return nil on garbage")
+	}
+}
+
+func TestProductPage(t *testing.T) {
+	b, err := os.ReadFile("testdata/product_page.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit, nutri, sections := ProductPage(string(b))
+	if unit != "0,99 €/l" {
+		t.Errorf("unit price %q", unit)
+	}
+	if nutri != "A" {
+		t.Errorf("nutri-score %q", nutri)
+	}
+	if v := sections["Valeurs nutritionnelles"]; !strings.Contains(v, "Energie (kcal) : 46") {
+		t.Errorf("nutrition values %q", v)
+	}
+	if _, ok := sections["Ingrédients"]; ok {
+		t.Errorf("empty ingredients (-) should be left out")
+	}
+	if got := ProductURL(string(b), "403997"); got == "" {
+		t.Errorf("no product URL found")
 	}
 }

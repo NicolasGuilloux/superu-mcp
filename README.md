@@ -150,7 +150,7 @@ authenticating reverse proxy in front of it.
 | Tool | Arguments | Description |
 | --- | --- | --- |
 | `search_products` | `query` (required), `page`, `size` | Search the catalog, with prices, unit prices and promotions. |
-| `product_detail` | `ean` (required) | Product sheet and customer rating. |
+| `product_detail` | `ean` (required) | Product sheet: price, unit price, promotion, rating, Nutri-Score, ingredients, nutrition values and other page sections. |
 | `favorites_list` | `limit` | Products you buy often. Requires login. |
 | `stores_find` | `postcode`, `town` (required) | Drive stores nearby, nearest first, with their ids. |
 | `store_set` | `store_id` (required) | Choose the store used by searches and the cart (drive pickup). |

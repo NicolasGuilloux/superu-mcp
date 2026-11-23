@@ -125,7 +125,7 @@ func newServer() *mcp.Server {
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "product_detail",
-		Description: "Get the sheet of a product by EAN barcode: name, brand, category, image and customer rating."},
+		Description: "Get the sheet of a product by EAN barcode: name, brand, price, unit price, promotion, category, image, customer rating, Nutri-Score, and the product page sections (ingredients, nutrition values, allergens, storage...)."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in eanIn) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) {
 				pid, err := coursesu.ResolveProductID(ctx, in.EAN)

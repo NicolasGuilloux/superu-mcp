@@ -72,11 +72,20 @@ type HistoryResult struct {
 }
 
 type ProductDetail struct {
-	ID       string   `json:"id"`
-	Name     *string  `json:"name"`
-	EAN      *string  `json:"ean"`
-	Brand    *string  `json:"brand"`
-	Category string   `json:"category"`
-	Image    *string  `json:"image"`
-	Rating   *float64 `json:"rating"`
+	ID         string   `json:"id"`
+	Name       *string  `json:"name"`
+	EAN        *string  `json:"ean"`
+	Brand      *string  `json:"brand"`
+	Price      string   `json:"price,omitempty"`
+	UnitPrice  string   `json:"unit_price,omitempty"`
+	Promotion  string   `json:"promotion,omitempty"`
+	Discount   string   `json:"discount,omitempty"`
+	Category   string   `json:"category"`
+	Image      *string  `json:"image"`
+	Rating     *float64 `json:"rating"`
+	URL        string   `json:"url,omitempty"`
+	NutriScore string   `json:"nutri_score,omitempty"`
+	// Sections holds the product page texts by heading: ingredients,
+	// nutrition values, allergens, origin, storage...
+	Sections map[string]string `json:"sections,omitempty"`
 }
