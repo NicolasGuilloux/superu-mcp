@@ -39,10 +39,8 @@ works from a headless server:
 
 1. Run `coursesu login --link` (or call the `login_start` tool). It prints a
    login link and keeps a PKCE secret on this machine.
-2. In your browser, block the callback so the page does not use the code:
-   DevTools, Network request blocking (Chrome: Cmd/Ctrl+Shift+P, "Show
-   Network request blocking"), pattern `*Login-OAuthReentryForgerock?*`.
-   With uBlock Origin: `||www.coursesu.com^*Login-OAuthReentryForgerock$document`.
+2. In your browser, block the callback so the page does not use the code
+   (see [Blocking the callback](#blocking-the-callback)).
 3. Open the link in that tab and log in.
 4. Copy the blocked address, which contains `code=` and `state=`, and right
    away run `coursesu login --callback '<url>'` (or call `login_finish`). The
@@ -52,6 +50,36 @@ The session is saved in `~/.config/coursesu/session.json` (mode 600). When
 Cloudflare turns a request away, the MCP server gets a new clearance through
 FlareSolverr and retries, keeping your account session. Log in again when the
 account session expires.
+
+### Blocking the callback
+
+After you log in, the SSO sends your browser to
+`https://www.coursesu.com/…/Login-OAuthReentryForgerock?code=…&state=…`.
+That page must not load, or it uses the code before the CLI can. Block it in
+one of these ways, then copy the blocked address.
+
+**uBlock Origin** (Firefox, or a Chromium browser that still runs it; uBO
+Lite cannot do this): open the uBlock dashboard, **My filters**, add this
+line and click **Apply changes**:
+
+```
+||www.coursesu.com^*Login-OAuthReentryForgerock$document
+```
+
+`||www.coursesu.com^` only matches addresses on www.coursesu.com, so the
+login link and the SSO steps, which mention the callback in their
+`redirect_uri`, still go through. `$document` blocks the page itself and
+shows uBlock's "page blocked" screen, which displays the blocked address:
+copy it from there. The rule also blocks logging in to coursesu.com in that
+browser, so turn it off (or comment it out with `!`) when you are done.
+
+**DevTools** (any Chromium browser): before opening the link, open DevTools,
+press Cmd/Ctrl+Shift+P, run "Show Network request blocking", tick "Enable
+network request blocking" and add the pattern
+`*Login-OAuthReentryForgerock?*`. Keep DevTools open in that tab while you
+log in. The question mark matters: DevTools patterns match anywhere in the
+address, and only the real callback has a query string right after the
+name. The address bar then holds the address to copy.
 
 ### Keeping the session alive
 
