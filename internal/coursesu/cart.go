@@ -2,6 +2,7 @@ package coursesu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -13,7 +14,27 @@ import (
 
 // Cart-AddProduct is sent with update=true, so qty is the line's absolute
 // quantity and qty 0 removes the line. CartRemove and CartSet delegate here.
+//
+// coursesu.com forgets the chosen store when the session is renewed, and
+// Cart-AddProduct then answers with an empty body. When a store is saved,
+// CartAdd chooses it again and retries once.
 func CartAdd(ctx context.Context, productID string, qty int) (model.CartMutationResult, error) {
+	res, err := cartAdd(ctx, productID, qty)
+	var de *DomainError
+	if err == nil || !errors.As(err, &de) || !de.emptyCart {
+		return res, err
+	}
+	cookies, cerr := session.RequireCookies()
+	if cerr != nil || cookies["storeId"] == "" {
+		return res, err
+	}
+	if _, serr := SetStore(ctx, cookies["storeId"]); serr != nil {
+		return res, err
+	}
+	return cartAdd(ctx, productID, qty)
+}
+
+func cartAdd(ctx context.Context, productID string, qty int) (model.CartMutationResult, error) {
 	cookies, err := session.RequireCookies()
 	if err != nil {
 		return model.CartMutationResult{}, err
@@ -40,10 +61,10 @@ func CartAdd(ctx context.Context, productID string, qty int) (model.CartMutation
 	session.Persist(cookies, resp.SetCookies)
 
 	if len(resp.Body) == 0 {
-		return model.CartMutationResult{}, newErr(
+		return model.CartMutationResult{}, emptyCartErr(
 			fmt.Sprintf("Cart-AddProduct returned an empty response (HTTP %d) and "+
-				"the cart was unchanged — the session likely has no store/delivery "+
-				"slot selected. Pick one on coursesu.com, then re-run: coursesu login",
+				"the cart was unchanged: no store is chosen. Choose one with "+
+				"`coursesu stores` and `coursesu store-set` (MCP: stores_find, store_set)",
 				resp.StatusCode),
 			map[string]any{"status_code": resp.StatusCode})
 	}

@@ -17,12 +17,18 @@ func checkOK(resp *client.Response, label string) error {
 type DomainError struct {
 	Msg   string
 	Extra map[string]any
+	// emptyCart marks an empty Cart-AddProduct answer (no store chosen).
+	emptyCart bool
 }
 
 func (e *DomainError) Error() string { return e.Msg }
 
 func newErr(msg string, extra map[string]any) *DomainError {
 	return &DomainError{Msg: msg, Extra: extra}
+}
+
+func emptyCartErr(msg string, extra map[string]any) *DomainError {
+	return &DomainError{Msg: msg, Extra: extra, emptyCart: true}
 }
 
 func preview(s string, n int) string {
