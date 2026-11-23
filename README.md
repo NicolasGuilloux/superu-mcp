@@ -62,55 +62,70 @@ coursesu.com first.
 
 ## MCP server
 
-`superu-mcp` speaks MCP over stdio. Example for Claude Code:
+The tools follow the same contract as
+[intermarche-mcp](https://github.com/NicolasGuilloux/intermarche-mcp).
+
+```
+superu-mcp [mcp]             stdio
+superu-mcp mcp http [addr]   HTTP on addr (default :8080, or $MCP_ADDR):
+                               Streamable HTTP on /mcp
+                               HTTP+SSE (older clients) on /sse
+                               health check on /healthz
+```
+
+stdio, for example with Claude Code:
 
 ```sh
 claude mcp add superu -- ~/.local/bin/superu-mcp
 ```
 
-Or in a client's JSON configuration:
+HTTP:
 
-```json
-{
-  "mcpServers": {
-    "superu": { "command": "/home/you/.local/bin/superu-mcp" }
-  }
-}
+```sh
+superu-mcp mcp http :8080
+claude mcp add --transport http superu http://localhost:8080/mcp
+claude mcp add --transport sse superu-sse http://localhost:8080/sse
 ```
 
-| Tool | What it does |
-|------|--------------|
-| `search_products` | Search the catalog |
-| `get_products` | Details and rating for product ids |
-| `list_favorites` | Products you buy often |
-| `list_orders` | Past orders with their items |
-| `get_cart` | Current cart |
-| `add_to_cart` | Add a product |
-| `set_cart_quantity` | Change a product's quantity |
-| `remove_from_cart` | Remove a product |
-| `clear_cart` | Empty the cart |
-| `login_start` | Get a login link |
-| `login_finish` | Finish logging in with the copied address |
+The HTTP server has no authentication: anyone who reaches it can use your
+coursesu.com account. Keep it on localhost or a private network, or put an
+authenticating reverse proxy in front of it.
+
+| Tool | Arguments | Description |
+| --- | --- | --- |
+| `search_products` | `query` (required), `page`, `size` | Search the catalog. |
+| `product_detail` | `ean` (required) | Product sheet and customer rating. |
+| `favorites_list` | `limit` | Products you buy often. Requires login. |
+| `basket_get` | none | Current cart. Requires login. |
+| `basket_add` | `ean` (required), `quantity` | Add a product by EAN-13 barcode. Requires login and a store and slot chosen on coursesu.com. |
+| `basket_remove` | `ean` (required), `quantity` | Remove a product (0 = remove all). Requires login. |
+| `basket_clear` | none | Empty the cart. Requires login. |
+| `orders_list` | none | Recent orders with their articles. Requires login. |
+| `order_detail` | `order_number` (required) | One order with all its articles. Requires login. |
+| `login_start` | none | Get a login link. |
+| `login_finish` | `callback_url` (required) | Finish logging in with the copied address. |
+
+Where a tool takes an `ean`, a coursesu product id is accepted too. Unlike
+intermarche-mcp there are no `store_*` tools: the store and slot are chosen on
+coursesu.com.
 
 ## Docker
 
 Each push to `main` publishes `ghcr.io/nicolasguilloux/superu-mcp` (amd64 and
 arm64; tags `latest`, `main`, `sha-…`, and `X.Y.Z` for `vX.Y.Z` git tags). The
-image runs `superu-mcp` and also holds the `coursesu` CLI. The session is kept
-in a volume, and FlareSolverr is reached at `http://flaresolverr:8191/v1` on a
-shared network:
+image runs `superu-mcp mcp http` on port 8080 by default and also holds the
+`coursesu` CLI. `compose.yaml` runs it next to FlareSolverr, with the session
+in a volume:
 
 ```sh
-docker compose up -d          # starts FlareSolverr on the "superu" network
+docker compose up -d     # MCP on http://localhost:8080/mcp and /sse
 
 # log in once
-docker run -it --rm --network superu -v superu-session:/home/nonroot/.config/coursesu \
-  --entrypoint coursesu ghcr.io/nicolasguilloux/superu-mcp login --link
-docker run -it --rm --network superu -v superu-session:/home/nonroot/.config/coursesu \
-  --entrypoint coursesu ghcr.io/nicolasguilloux/superu-mcp login --callback '<url>'
+docker compose run --rm --entrypoint coursesu superu login --link
+docker compose run --rm --entrypoint coursesu superu login --callback '<url>'
 ```
 
-MCP client configuration (stdio, so `-i` is required):
+For stdio instead, pass `mcp` as the command:
 
 ```json
 {
@@ -119,7 +134,7 @@ MCP client configuration (stdio, so `-i` is required):
       "command": "docker",
       "args": ["run", "-i", "--rm", "--network", "superu",
                "-v", "superu-session:/home/nonroot/.config/coursesu",
-               "ghcr.io/nicolasguilloux/superu-mcp"]
+               "ghcr.io/nicolasguilloux/superu-mcp", "mcp"]
     }
   }
 }

@@ -5,10 +5,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -21,37 +25,34 @@ var version = "dev"
 
 const instructions = `Tools for coursesu.com, the Système U online supermarket (Super U, Hyper U, U Express drive and delivery).
 
-Log in once with login_start then login_finish; the session is saved and reused. Cart changes only work once a store and a delivery or pickup slot are chosen on coursesu.com. Product ids ("pid") come from search_products, list_favorites or get_cart. The tools never place or pay for an order: the person checks out on coursesu.com.`
+Log in once with login_start then login_finish; the session is saved and reused. Cart changes only work once a store and a delivery or pickup slot are chosen on coursesu.com. Products are identified by their EAN barcode, as returned by search_products, favorites_list and basket_get. The tools never place or pay for an order: the person checks out on coursesu.com.`
 
 type searchIn struct {
-	Query string `json:"query" jsonschema:"what to search for, in French, e.g. lait demi-écrémé"`
-	Limit int    `json:"limit,omitempty" jsonschema:"maximum number of products to return (default 20)"`
+	Query string `json:"query" jsonschema:"product search query, in French, e.g. lait demi-écrémé"`
+	Page  int    `json:"page,omitempty" jsonschema:"page number (default: 1)"`
+	Size  int    `json:"size,omitempty" jsonschema:"results per page (default: 20)"`
 }
 
-type productIn struct {
-	ProductIDs []string `json:"product_ids" jsonschema:"product ids (pid) to describe"`
+type eanIn struct {
+	EAN string `json:"ean" jsonschema:"product EAN-13 barcode (a coursesu product id is accepted too)"`
+}
+
+type basketAddIn struct {
+	EAN      string `json:"ean" jsonschema:"product EAN-13 barcode (a coursesu product id is accepted too)"`
+	Quantity int    `json:"quantity,omitempty" jsonschema:"quantity to add (default: 1)"`
+}
+
+type basketRemoveIn struct {
+	EAN      string `json:"ean" jsonschema:"product EAN-13 barcode (a coursesu product id is accepted too)"`
+	Quantity int    `json:"quantity,omitempty" jsonschema:"quantity to remove (0 = remove all, default: 0)"`
+}
+
+type orderIn struct {
+	OrderNumber string `json:"order_number" jsonschema:"order number, from orders_list"`
 }
 
 type favoritesIn struct {
 	Limit int `json:"limit,omitempty" jsonschema:"maximum number of products to return"`
-}
-
-type historyIn struct {
-	Limit int `json:"limit,omitempty" jsonschema:"maximum number of past orders to return"`
-}
-
-type cartAddIn struct {
-	ProductID string `json:"product_id" jsonschema:"product id (pid) to add"`
-	Quantity  int    `json:"quantity,omitempty" jsonschema:"how many to add (default 1)"`
-}
-
-type cartSetIn struct {
-	ProductID string `json:"product_id" jsonschema:"product id (pid) already in the cart"`
-	Quantity  int    `json:"quantity" jsonschema:"new quantity; 0 removes the product"`
-}
-
-type cartRemoveIn struct {
-	ProductID string `json:"product_id" jsonschema:"product id (pid) to remove"`
 }
 
 type loginFinishIn struct {
@@ -60,18 +61,16 @@ type loginFinishIn struct {
 
 type empty struct{}
 
-// call runs fn with the saved session. When Cloudflare turns the request
-// away, it gets a fresh clearance through FlareSolverr and tries once more.
+// callMu serializes tool calls: they share one HTTP client and one
+// session file, and the HTTP transports can serve several clients at once.
+var callMu sync.Mutex
+
+// call runs fn with the saved session, refreshing the Cloudflare clearance
+// when needed, and returns its result as JSON text.
 func call[T any](ctx context.Context, fn func(context.Context) (T, error)) (*mcp.CallToolResult, any, error) {
-	client.SetUserAgent(session.UserAgent())
-	out, err := fn(ctx)
-	if coursesu.IsCloudflareBlock(err) {
-		if rerr := coursesu.RefreshClearance(ctx); rerr == nil {
-			out, err = fn(ctx)
-		} else {
-			log.Printf("clearance refresh failed: %v", rerr)
-		}
-	}
+	callMu.Lock()
+	defer callMu.Unlock()
+	out, err := coursesu.WithClearance(ctx, fn)
 	if err != nil {
 		return errorResult(err), nil, nil
 	}
@@ -98,85 +97,94 @@ func errorResult(err error) *mcp.CallToolResult {
 	return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: string(b)}}}
 }
 
-func main() {
-	log.SetOutput(os.Stderr)
+func newServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "superu-mcp", Version: version},
 		&mcp.ServerOptions{Instructions: instructions})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "search_products",
-		Description: "Search the coursesu.com catalog. Returns product ids, names, brands, EANs and categories."},
+		Description: "Search the coursesu.com product catalog. Returns product ids, names, brands, EANs and categories."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, any, error) {
-			limit := in.Limit
-			if limit <= 0 {
-				limit = 20
+			size := in.Size
+			if size <= 0 {
+				size = 20
 			}
 			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.Search(ctx, in.Query, limit)
+				return coursesu.SearchPage(ctx, in.Query, in.Page, size, size)
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "get_products",
-		Description: "Get details and customer rating for one or more product ids."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in productIn) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "product_detail",
+		Description: "Get the sheet of a product by EAN barcode: name, brand, category, image and customer rating."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in eanIn) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.Product(ctx, in.ProductIDs)
+				pid, err := coursesu.ResolveProductID(ctx, in.EAN)
+				if err != nil {
+					return nil, err
+				}
+				return coursesu.Product(ctx, []string{pid})
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "list_favorites",
-		Description: "List the products the person buys often (their \"produits préférés\")."},
+	mcp.AddTool(server, &mcp.Tool{Name: "favorites_list",
+		Description: "List the products the person buys often (their \"produits préférés\"). Requires login."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in favoritesIn) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) {
 				return coursesu.Favorites(ctx, coursesu.FavoritesOptions{MaxPages: 50, Limit: in.Limit})
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "list_orders",
-		Description: "List past orders with their date, store, total and items."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in historyIn) (*mcp.CallToolResult, any, error) {
-			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.History(ctx, in.Limit)
-			})
-		})
-
-	mcp.AddTool(server, &mcp.Tool{Name: "get_cart",
-		Description: "Show the current cart: items, quantities and prices."},
+	mcp.AddTool(server, &mcp.Tool{Name: "basket_get",
+		Description: "Get current shopping cart contents. Requires login."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) { return coursesu.CartList(ctx) })
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "add_to_cart",
-		Description: "Add a product to the cart. Needs a store and a slot chosen on coursesu.com."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in cartAddIn) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "basket_add",
+		Description: "Add a product to the shopping cart by EAN barcode. Requires login and a store and slot chosen on coursesu.com."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in basketAddIn) (*mcp.CallToolResult, any, error) {
 			qty := in.Quantity
 			if qty <= 0 {
 				qty = 1
 			}
 			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.CartAdd(ctx, in.ProductID, qty)
+				pid, err := coursesu.ResolveProductID(ctx, in.EAN)
+				if err != nil {
+					return nil, err
+				}
+				return coursesu.CartAdd(ctx, pid, qty)
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "set_cart_quantity",
-		Description: "Set the quantity of a product already in the cart."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in cartSetIn) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "basket_remove",
+		Description: "Remove a product from the shopping cart by EAN barcode. Quantity 0 removes all. Requires login."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in basketRemoveIn) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.CartSet(ctx, in.ProductID, in.Quantity)
+				pid, err := coursesu.ResolveProductID(ctx, in.EAN)
+				if err != nil {
+					return nil, err
+				}
+				return coursesu.CartRemoveQuantity(ctx, pid, in.Quantity)
 			})
 		})
 
-	mcp.AddTool(server, &mcp.Tool{Name: "remove_from_cart",
-		Description: "Remove a product from the cart."},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in cartRemoveIn) (*mcp.CallToolResult, any, error) {
-			return call(ctx, func(ctx context.Context) (any, error) {
-				return coursesu.CartRemove(ctx, in.ProductID)
-			})
-		})
-
-	mcp.AddTool(server, &mcp.Tool{Name: "clear_cart",
-		Description: "Empty the whole cart. Ask the person before using it."},
+	mcp.AddTool(server, &mcp.Tool{Name: "basket_clear",
+		Description: "Empty the whole shopping cart. Ask the person before using it. Requires login."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
 			return call(ctx, func(ctx context.Context) (any, error) { return coursesu.CartClear(ctx) })
+		})
+
+	mcp.AddTool(server, &mcp.Tool{Name: "orders_list",
+		Description: "List recent orders with their date, store, total and articles. Requires login."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
+			return call(ctx, func(ctx context.Context) (any, error) { return coursesu.History(ctx, 0) })
+		})
+
+	mcp.AddTool(server, &mcp.Tool{Name: "order_detail",
+		Description: "Get detailed information about a specific order including all articles. Requires login."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in orderIn) (*mcp.CallToolResult, any, error) {
+			return call(ctx, func(ctx context.Context) (any, error) {
+				return coursesu.FindOrder(ctx, in.OrderNumber)
+			})
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "login_start",
@@ -195,9 +203,83 @@ func main() {
 			})
 		})
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	return server
+}
+
+const usage = `superu-mcp: MCP server for coursesu.com
+
+Usage:
+  superu-mcp [mcp]           MCP server over stdio
+  superu-mcp mcp http [addr] MCP server over HTTP (default :8080, or $MCP_ADDR):
+                               Streamable HTTP on /mcp, SSE on /sse
+`
+
+func main() {
+	log.SetOutput(os.Stderr)
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "mcp" {
+		args = args[1:]
+	}
+	var err error
+	switch {
+	case len(args) == 0 || args[0] == "stdio":
+		err = serveStdio()
+	case args[0] == "http":
+		addr := os.Getenv("MCP_ADDR")
+		if len(args) > 1 {
+			addr = args[1]
+		}
+		if addr == "" {
+			addr = ":8080"
+		}
+		err = serveHTTP(addr)
+	case args[0] == "-h" || args[0] == "--help" || args[0] == "help":
+		fmt.Print(usage)
+	case args[0] == "-v" || args[0] == "--version" || args[0] == "version":
+		fmt.Println(version)
+	default:
+		fmt.Fprint(os.Stderr, usage)
+		os.Exit(2)
+	}
+	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func serveStdio() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := newServer().Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+		return err
+	}
+	return nil
+}
+
+// serveHTTP serves the MCP server over Streamable HTTP on /mcp and over the
+// older HTTP+SSE transport on /sse, until SIGINT or SIGTERM.
+func serveHTTP(addr string) error {
+	server := newServer()
+	getServer := func(*http.Request) *mcp.Server { return server }
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", mcp.NewStreamableHTTPHandler(getServer, nil))
+	mux.Handle("/sse", mcp.NewSSEHandler(getServer, nil))
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+	log.Printf("MCP server listening on %s (Streamable HTTP: /mcp, SSE: /sse)", addr)
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+	}
+	log.Print("shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return srv.Shutdown(shutdownCtx)
 }

@@ -2,6 +2,7 @@ package coursesu
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/NicolasGuilloux/superu-mcp/internal/client"
@@ -11,8 +12,21 @@ import (
 )
 
 func Search(ctx context.Context, query string, limit int) ([]model.Product, error) {
+	return SearchPage(ctx, query, 1, 0, limit)
+}
+
+// SearchPage fetches one page of results. page starts at 1; size 0 keeps the
+// site's default page size.
+func SearchPage(ctx context.Context, query string, page, size, limit int) ([]model.Product, error) {
 	cookies := session.LoadCookies()
-	resp, err := client.Get(ctx, "/recherche?q="+url.QueryEscape(query), client.BaseURL+"/", cookies)
+	path := "/recherche?q=" + url.QueryEscape(query)
+	if size > 0 {
+		if page < 1 {
+			page = 1
+		}
+		path += fmt.Sprintf("&sz=%d&start=%d", size, (page-1)*size)
+	}
+	resp, err := client.Get(ctx, path, client.BaseURL+"/", cookies)
 	if err != nil {
 		return nil, err
 	}

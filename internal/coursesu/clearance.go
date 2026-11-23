@@ -59,3 +59,17 @@ func RefreshClearance(ctx context.Context) error {
 	client.SetUserAgent(sol.UserAgent)
 	return nil
 }
+
+// WithClearance runs fn, and when Cloudflare turns it away, gets a fresh
+// clearance through FlareSolverr and runs it once more.
+func WithClearance[T any](ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
+	client.SetUserAgent(session.UserAgent())
+	out, err := fn(ctx)
+	if !IsCloudflareBlock(err) {
+		return out, err
+	}
+	if rerr := RefreshClearance(ctx); rerr != nil {
+		return out, errors.Join(err, rerr)
+	}
+	return fn(ctx)
+}

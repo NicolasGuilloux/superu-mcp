@@ -1,10 +1,31 @@
-# FlareSolverr plus a container to run login commands in.
-# The MCP client starts superu-mcp itself, see the README.
+# superu-mcp over HTTP, next to the FlareSolverr it needs.
+#
+#   docker compose up -d                         # MCP on :8080 (/mcp and /sse)
+#   docker compose run --rm --entrypoint coursesu superu login --link
+#   docker compose run --rm --entrypoint coursesu superu login --callback '<url>'
+
 services:
+  superu:
+    image: ghcr.io/nicolasguilloux/superu-mcp:latest
+    build: .
+    restart: unless-stopped
+    depends_on: [flaresolverr]
+    environment:
+      MCP_ADDR: ":8080"
+      COURSESU_FLARESOLVERR_URL: http://flaresolverr:8191/v1
+    ports:
+      - "8080:8080"   # Streamable HTTP on /mcp, SSE on /sse
+    volumes:
+      - superu-session:/home/nonroot/.config/coursesu
+    networks: [superu]
+
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     restart: unless-stopped
     networks: [superu]
+
+volumes:
+  superu-session:
 
 networks:
   superu:

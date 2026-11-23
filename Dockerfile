@@ -17,6 +17,10 @@ COPY --from=build /out/superu-mcp /out/coursesu /usr/local/bin/
 COPY --from=build --chown=65532:65532 /out/config /home/nonroot/.config
 # The session lives in $HOME/.config/coursesu: mount a volume there.
 ENV HOME=/home/nonroot \
-    COURSESU_FLARESOLVERR_URL=http://flaresolverr:8191/v1
+    COURSESU_FLARESOLVERR_URL=http://flaresolverr:8191/v1 \
+    MCP_ADDR=:8080
 VOLUME ["/home/nonroot/.config/coursesu"]
+EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/superu-mcp"]
+# Default: Streamable HTTP on /mcp and SSE on /sse. Use "mcp" alone for stdio.
+CMD ["mcp", "http"]

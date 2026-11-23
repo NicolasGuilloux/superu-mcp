@@ -16,7 +16,9 @@ import (
 
 func run(fn func(ctx context.Context, args []string) (any, error)) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		res, err := fn(cmd.Context(), args)
+		res, err := coursesu.WithClearance(cmd.Context(), func(ctx context.Context) (any, error) {
+			return fn(ctx, args)
+		})
 		if err != nil {
 			return err
 		}
