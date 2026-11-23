@@ -1,12 +1,17 @@
 package model
 
 type Product struct {
-	ID       string  `json:"id"`
-	Name     *string `json:"name"`
-	EAN      *string `json:"ean"`
-	Brand    *string `json:"brand"`
-	Category string  `json:"category"`
-	Image    *string `json:"image"`
+	ID    string  `json:"id"`
+	Name  *string `json:"name"`
+	EAN   *string `json:"ean"`
+	Brand *string `json:"brand"`
+	// Price is the shelf price in euros, as the site sends it ("0.62").
+	Price     string  `json:"price,omitempty"`
+	UnitPrice string  `json:"unit_price,omitempty"`
+	Promotion string  `json:"promotion,omitempty"`
+	Discount  string  `json:"discount,omitempty"`
+	Category  string  `json:"category"`
+	Image     *string `json:"image"`
 }
 
 type CartItem struct {

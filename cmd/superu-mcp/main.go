@@ -165,18 +165,14 @@ func newServer() *mcp.Server {
 		})
 
 	mcp.AddTool(server, &mcp.Tool{Name: "basket_add",
-		Description: "Add a product to the shopping cart by EAN barcode. Requires login and a store and slot chosen on coursesu.com."},
+		Description: "Add a quantity of a product to the shopping cart by EAN barcode (on top of what is already there). Requires login and a store chosen with store_set."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in basketAddIn) (*mcp.CallToolResult, any, error) {
 			qty := in.Quantity
 			if qty <= 0 {
 				qty = 1
 			}
 			return call(ctx, func(ctx context.Context) (any, error) {
-				pid, err := coursesu.ResolveProductID(ctx, in.EAN)
-				if err != nil {
-					return nil, err
-				}
-				return coursesu.CartAdd(ctx, pid, qty)
+				return coursesu.CartIncrease(ctx, in.EAN, qty)
 			})
 		})
 

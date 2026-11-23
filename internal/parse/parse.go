@@ -24,6 +24,11 @@ type productTile struct {
 	Cat2    *string `json:"product_cat2"`
 	Cat3    *string `json:"product_cat3"`
 	Picture *string `json:"product_url_picture"`
+	Price   string  `json:"price"`
+	Promo   struct {
+		Name string `json:"name"`
+	} `json:"promotion"`
+	Discount string `json:"discount"`
 }
 
 func Products(body string) ([]model.Product, error) {
@@ -52,13 +57,21 @@ func Products(body string) ([]model.Product, error) {
 				cats = append(cats, *c)
 			}
 		}
+		promo := t.Promo.Name
+		if promo == "unknown" {
+			promo = ""
+		}
 		out = append(out, model.Product{
-			ID:       t.ID,
-			Name:     t.Name,
-			EAN:      t.EAN,
-			Brand:    t.Brand,
-			Category: strings.Join(cats, " > "),
-			Image:    t.Picture,
+			ID:        t.ID,
+			Name:      t.Name,
+			EAN:       t.EAN,
+			Brand:     t.Brand,
+			Price:     t.Price,
+			UnitPrice: strings.Join(strings.Fields(s.Find(".unit-info").First().Text()), " "),
+			Promotion: promo,
+			Discount:  t.Discount,
+			Category:  strings.Join(cats, " > "),
+			Image:     t.Picture,
 		})
 	})
 	return out, nil

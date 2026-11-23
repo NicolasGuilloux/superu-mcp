@@ -149,13 +149,13 @@ authenticating reverse proxy in front of it.
 
 | Tool | Arguments | Description |
 | --- | --- | --- |
-| `search_products` | `query` (required), `page`, `size` | Search the catalog. |
+| `search_products` | `query` (required), `page`, `size` | Search the catalog, with prices, unit prices and promotions. |
 | `product_detail` | `ean` (required) | Product sheet and customer rating. |
 | `favorites_list` | `limit` | Products you buy often. Requires login. |
 | `stores_find` | `postcode`, `town` (required) | Drive stores nearby, nearest first, with their ids. |
 | `store_set` | `store_id` (required) | Choose the store used by searches and the cart (drive pickup). |
 | `basket_get` | none | Current cart. Requires login. |
-| `basket_add` | `ean` (required), `quantity` | Add a product by EAN-13 barcode. Requires login and a store and slot chosen on coursesu.com. |
+| `basket_add` | `ean` (required), `quantity` | Add a quantity of a product by EAN-13 barcode, on top of what the cart holds. Requires login and a store chosen with `store_set`. |
 | `basket_remove` | `ean` (required), `quantity` | Remove a product (0 = remove all). Requires login. |
 | `basket_clear` | none | Empty the cart. Requires login. |
 | `orders_list` | none | Recent orders with their articles. Requires login. |
@@ -214,9 +214,9 @@ coursesu product <pid>...
 coursesu favorites
 coursesu history
 coursesu cart-list
-coursesu cart-add <pid> [--qty n]
-coursesu cart-set <pid> <qty>
-coursesu cart-remove <pid>
+coursesu cart-add <pid|ean> [--qty n]   # adds to what the cart holds
+coursesu cart-set <pid|ean> <qty>
+coursesu cart-remove <pid|ean>
 coursesu cart-clear
 ```
 

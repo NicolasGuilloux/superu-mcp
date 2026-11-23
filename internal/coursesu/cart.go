@@ -63,7 +63,7 @@ func cartAdd(ctx context.Context, productID string, qty int) (model.CartMutation
 	if len(resp.Body) == 0 {
 		return model.CartMutationResult{}, emptyCartErr(
 			fmt.Sprintf("Cart-AddProduct returned an empty response (HTTP %d) and "+
-				"the cart was unchanged: no store is chosen. Choose one with "+
+				"the cart was unchanged: the product id is unknown, or no store is chosen. Choose one with "+
 				"`coursesu stores` and `coursesu store-set` (MCP: stores_find, store_set)",
 				resp.StatusCode),
 			map[string]any{"status_code": resp.StatusCode})

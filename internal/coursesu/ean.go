@@ -60,6 +60,21 @@ func quantityIn(cart model.CartSummary, productID string) int {
 	return 0
 }
 
+// CartIncrease adds qty of a product (an id or an EAN) to what the cart
+// already holds. Cart-AddProduct itself sets the quantity, so it reads the
+// cart first.
+func CartIncrease(ctx context.Context, code string, qty int) (model.CartMutationResult, error) {
+	pid, err := ResolveProductID(ctx, code)
+	if err != nil {
+		return model.CartMutationResult{}, err
+	}
+	have, err := CartQuantity(ctx, pid)
+	if err != nil {
+		return model.CartMutationResult{}, err
+	}
+	return CartAdd(ctx, pid, have+qty)
+}
+
 // CartRemoveQuantity removes qty of a product from the cart; qty 0 or more
 // than the cart holds removes it entirely.
 func CartRemoveQuantity(ctx context.Context, productID string, qty int) (model.CartMutationResult, error) {

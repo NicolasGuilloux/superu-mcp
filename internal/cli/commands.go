@@ -137,11 +137,11 @@ func newSearchCmd() *cobra.Command {
 func newCartAddCmd() *cobra.Command {
 	var qty int
 	cmd := &cobra.Command{
-		Use:   "cart-add <pid>",
-		Short: "add a product to the cart",
+		Use:   "cart-add <pid|ean>",
+		Short: "add a product to the cart, on top of what it already holds",
 		Args:  cobra.ExactArgs(1),
 		RunE: run(func(ctx context.Context, a []string) (any, error) {
-			return coursesu.CartAdd(ctx, a[0], qty)
+			return coursesu.CartIncrease(ctx, a[0], qty)
 		}),
 	}
 	cmd.Flags().IntVar(&qty, "qty", 1, "quantity to add")
@@ -189,17 +189,27 @@ func subcommands() []*cobra.Command {
 		newHistoryCmd(),
 		simpleCmd("cart-list", "list current cart contents",
 			cobra.NoArgs, arg0(coursesu.CartList)),
-		simpleCmd("cart-remove <pid>",
+		simpleCmd("cart-remove <pid|ean>",
 			"remove a product from the cart",
-			cobra.ExactArgs(1), arg1(coursesu.CartRemove)),
-		simpleCmd("cart-set <pid> <qty>",
+			cobra.ExactArgs(1), func(ctx context.Context, a []string) (any, error) {
+				pid, err := coursesu.ResolveProductID(ctx, a[0])
+				if err != nil {
+					return nil, err
+				}
+				return coursesu.CartRemove(ctx, pid)
+			}),
+		simpleCmd("cart-set <pid|ean> <qty>",
 			"set a product's quantity",
 			cobra.ExactArgs(2), func(ctx context.Context, a []string) (any, error) {
 				qty, err := strconv.Atoi(a[1])
 				if err != nil {
 					return nil, err
 				}
-				return coursesu.CartSet(ctx, a[0], qty)
+				pid, err := coursesu.ResolveProductID(ctx, a[0])
+				if err != nil {
+					return nil, err
+				}
+				return coursesu.CartSet(ctx, pid, qty)
 			}),
 		simpleCmd("stores <postcode> <town>",
 			"list the drive stores near a postcode and town",
